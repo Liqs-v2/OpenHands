@@ -57,7 +57,35 @@ that OpenHands is ready to run on your system:
 make build
 ```
 
-### 3. Configuring the Language Model
+**Note:** The `make build` command installs only the main dependencies. For evaluation work, you'll also need to install optional dependencies as described in [section 3](#3-installing-optional-dependencies-for-evaluation).
+
+### 3. Installing Optional Dependencies for Evaluation
+
+OpenHands includes several optional dependency groups for different purposes. The most commonly needed optional group is `evaluation`, which includes packages like `datasets`, `transformers`, and other ML/evaluation tools.
+
+By default, `make build` and `poetry install` only install the main dependencies. To install optional dependency groups:
+
+```bash
+# Install evaluation dependencies (includes datasets, transformers, etc.)
+poetry install --with evaluation
+
+# Install multiple optional groups
+poetry install --with evaluation,test,dev
+
+# Install all optional dependencies
+poetry install --all-extras
+```
+
+**Available optional dependency groups:**
+- `evaluation`: ML and evaluation tools (datasets, transformers, streamlit, etc.)
+- `test`: Testing frameworks and utilities
+- `dev`: Development tools (ruff, mypy, pre-commit, etc.)
+- `runtime`: Jupyter and runtime-specific dependencies
+- `testgeneval`: Additional testing and evaluation utilities
+
+If you encounter import errors for packages like `datasets`, `transformers`, or other evaluation-related packages, make sure you've installed the evaluation group with `poetry install --with evaluation`.
+
+### 4. Configuring the Language Model
 
 OpenHands supports a diverse array of Language Models (LMs) through the powerful [litellm](https://docs.litellm.ai) library.
 
@@ -78,7 +106,7 @@ Environment variables > config.toml variables > default variables
 **Note on Alternative Models:**
 See [our documentation](https://docs.all-hands.dev/usage/llms) for recommended models.
 
-### 4. Running the application
+### 5. Running the application
 
 #### Option A: Run the Full Application
 
@@ -131,14 +159,14 @@ poetry run pytest ./tests/unit/test_*.py
 1. Add your dependency in `pyproject.toml` or use `poetry add xxx`.
 2. Update the poetry.lock file via `poetry lock --no-update`.
 
-### 9. Use existing Docker image
+### 10. Use existing Docker image
 
 To reduce build time (e.g., if no changes were made to the client-runtime component), you can use an existing Docker
 container image by setting the SANDBOX_RUNTIME_CONTAINER_IMAGE environment variable to the desired Docker image.
 
 Example: `export SANDBOX_RUNTIME_CONTAINER_IMAGE=ghcr.io/all-hands-ai/runtime:0.42-nikolaik`
 
-## Develop inside Docker container
+## 11. Develop inside Docker container
 
 TL;DR
 
@@ -163,7 +191,7 @@ cd ./containers/dev
 
 You do need [Docker](https://docs.docker.com/engine/install/) installed on your host though.
 
-## Key Documentation Resources
+## 12. Key Documentation Resources
 
 Here's a guide to the important documentation files in the repository:
 

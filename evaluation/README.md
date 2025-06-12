@@ -8,6 +8,15 @@ This folder contains code and resources to run experiments and evaluations.
 
 Before starting evaluation, follow the instructions [here](https://github.com/All-Hands-AI/OpenHands/blob/main/Development.md) to setup your local development environment and LLM.
 
+**Important:** After completing the basic setup, you must install the evaluation dependencies to access packages like `datasets`, `transformers`, and other ML/evaluation tools:
+
+```bash
+# Install evaluation dependencies (required for most benchmarks)
+poetry install --with evaluation
+```
+
+The evaluation dependencies are in an optional dependency group and are not installed by default with `make build` or `poetry install`. Many benchmarks require packages like `datasets`, `streamlit`, `transformers`, etc., which are only available after installing the evaluation group.
+
 Once you are done with setup, you can follow the benchmark-specific instructions in each subdirectory of the [evaluation directory](#supported-benchmarks).
 Generally these will involve running `run_infer.py` to perform inference with the agents.
 
