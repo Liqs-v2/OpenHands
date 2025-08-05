@@ -380,7 +380,7 @@ class OpenHandsCleanupManager:
 
                 # Perform cleanup if needed
                 if should_cleanup:
-                    logging.info(f"Starting cleanup: {cleanup_reason}")
+                    logging.info(f"Starting cleanup{" [DRY RUN]" if self.config.dry_run else ""}: {cleanup_reason}")
 
                     container_results = self.cleanup_stopped_containers()
                     image_results = self.cleanup_unused_images()
@@ -399,17 +399,28 @@ class OpenHandsCleanupManager:
                         f"Post-cleanup disk usage: {post_cleanup_usage['usage_percent']:.1f}%"
                     )
 
-                # Wait for next check
-                time.sleep(self.config.check_interval_seconds)
+                # Wait for next check (with responsive shutdown checking)
+                self._interruptible_sleep(self.config.check_interval_seconds)
 
             except KeyboardInterrupt:
                 logging.info("Received interrupt signal, shutting down...")
                 break
             except Exception as e:
                 logging.error(f"Error in monitoring loop: {e}")
-                time.sleep(self.config.check_interval_seconds)
+                self._interruptible_sleep(self.config.check_interval_seconds)
 
         logging.info("OpenHands Docker Disk Space Manager stopped")
+
+    def _interruptible_sleep(self, duration_seconds: int):
+        """Sleep for the specified duration while checking for shutdown signal."""
+        sleep_interval = 1.0  # Check for shutdown every second
+        elapsed = 0.0
+
+        while elapsed < duration_seconds and self._running:
+            remaining = duration_seconds - elapsed
+            sleep_time = min(sleep_interval, remaining)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
 
     def stop(self):
         """Stop the monitoring loop."""
