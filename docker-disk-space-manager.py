@@ -69,9 +69,9 @@ class OpenHandsIdentifier:
 
     # OpenHands image patterns from the documentation
     OPENHANDS_IMAGE_PATTERNS = [
-        r'^oh_v\d+\.\d+\.\d+_.*',  # Versioned tag: oh_v{version}_{details}
-        r'^ghcr\.io/all-hands-ai/openhands.*',  # GitHub registry
-        r'^.*openhands.*',  # General OpenHands pattern
+        r'oh_v\d+\.\d+\.\d+_.*',  # Versioned tag: oh_v{version}_{details}
+        r'^ghcr\.io/all-hands-ai.*',  # GitHub registry
+        r'^.*all-hands-ai.*',  # General OpenHands pattern
     ]
 
     # OpenHands container name patterns
@@ -287,7 +287,7 @@ class OpenHandsCleanupManager:
         # Sort images by creation date (newest first)
         sorted_images = sorted(
             openhands_images,
-            key=lambda img: img.attrs.get('Created', ''),
+            key=lambda img: img.attrs.get('Created', '1970-01-01T00:00:00Z'),
             reverse=True
         )
 
