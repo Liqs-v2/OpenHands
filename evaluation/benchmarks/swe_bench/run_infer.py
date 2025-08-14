@@ -37,6 +37,7 @@ from evaluation.utils.shared import (
     reset_logger_for_multiprocessing,
     run_evaluation,
     update_llm_config_for_completions_logging,
+    update_condenser_llm_configs_for_completions_logging,
 )
 from openhands.controller.state.state import State
 from openhands.core.config import (
@@ -211,6 +212,11 @@ def get_config(
     )
     # get 'draft_editor' config if exists
     config.set_llm_config(get_llm_config_arg('draft_editor'), 'draft_editor')
+
+    # Ensure condenser LLM completions are logged under per-instance folder
+    update_condenser_llm_configs_for_completions_logging(
+        metadata.condenser_config, metadata.eval_output_dir, instance['instance_id']
+    )
 
     agent_config = AgentConfig(
         enable_jupyter=False,

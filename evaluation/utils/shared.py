@@ -505,6 +505,47 @@ def update_llm_config_for_completions_logging(
     return llm_config
 
 
+def update_condenser_llm_configs_for_completions_logging(
+    condenser_config: CondenserConfig | None,
+    eval_output_dir: str,
+    instance_id: str,
+) -> CondenserConfig | None:
+    """Ensure condenser LLM(s) log completions under per-instance folder.
+
+    - If the condenser has an `llm_config` and `log_completions` is enabled,
+      rewrite its `log_completions_folder` to `<eval_output_dir>/llm_completions/<instance_id>`.
+    - Supports condenser pipelines by updating all sub-condensers recursively.
+    """
+    if condenser_config is None:
+        return None
+
+    # Local imports to avoid circular deps at module import time
+    from openhands.core.config.condenser_config import (
+        LLMSummarizingCondenserConfig,
+        StructuredSummaryCondenserConfig,
+        CondenserPipelineConfig,
+    )
+
+    def _update_single(cfg: CondenserConfig) -> None:
+        # Update configs that have an llm_config
+        if isinstance(cfg, (LLMSummarizingCondenserConfig, StructuredSummaryCondenserConfig)):
+            llm_cfg = cfg.llm_config
+            if llm_cfg.log_completions:
+                llm_cfg.log_completions_folder = os.path.join(
+                    eval_output_dir, 'llm-SUMMARY-completions', instance_id
+                )
+                logger.info(
+                    f'Logging condenser LLM completions for instance {instance_id} to '
+                    f'{llm_cfg.log_completions_folder}'
+                )
+        elif isinstance(cfg, CondenserPipelineConfig):
+            for sub_cfg in cfg.condensers:
+                _update_single(sub_cfg)
+
+    _update_single(condenser_config)
+    return condenser_config
+
+
 # history is now available as a filtered stream of events, rather than list of pairs of (Action, Observation)
 # we rebuild the pairs here
 # for compatibility with the existing output format in evaluations

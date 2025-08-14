@@ -345,11 +345,19 @@ class LLM(RetryMixin, DebugMixin):
             # log for evals or other scripts that need the raw completion
             if self.config.log_completions:
                 assert self.config.log_completions_folder is not None
-                log_file = os.path.join(
-                    self.config.log_completions_folder,
-                    # use the metric model name (for draft editor)
-                    f'{self.metrics.model_name.replace("/", "__")}-{time.time()}.json',
-                )
+
+                if '-SUMMARY-' in self.config.log_completions_folder:
+                    log_file = os.path.join(
+                        self.config.log_completions_folder.replace('-SUMMARY-', '_'),
+                        # use the metric model name (for draft editor)
+                        f'{self.metrics.model_name.replace("/", "__")}-{time.time()}-summary.json',
+                    )
+                else:
+                    log_file = os.path.join(
+                        self.config.log_completions_folder,
+                        # use the metric model name (for draft editor)
+                        f'{self.metrics.model_name.replace("/", "__")}-{time.time()}.json',
+                    )
 
                 # set up the dict to be logged
                 _d = {
