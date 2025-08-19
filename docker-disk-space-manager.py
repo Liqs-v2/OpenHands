@@ -3,12 +3,14 @@
 OpenHands Docker Disk Space Manager
 
 A monitoring and cleanup tool for OpenHands Docker containers and images.
-Monitors disk usage and automatically cleans up stopped OpenHands containers
-and unused OpenHands images to prevent disk space issues on shared systems.
+Monitors Docker disk usage using the Docker API and automatically cleans up
+stopped OpenHands containers and unused OpenHands images when disk usage
+exceeds configurable thresholds.
 
 Features:
+- Docker-native disk usage monitoring via Docker API
+- Configurable absolute disk usage thresholds (bytes)
 - Configurable monitoring intervals
-- Disk usage thresholds
 - OpenHands-specific container/image identification
 - Safe cleanup (only targets OpenHands resources)
 - Comprehensive logging
@@ -19,7 +21,6 @@ import argparse
 import json
 import logging
 import re
-import shutil
 import signal
 import sys
 import time
@@ -41,9 +42,9 @@ class CleanupConfig:
     check_interval_seconds: int = 300  # 5 minutes
     cleanup_interval_seconds: int = 1800  # 30 minutes
 
-    # Disk usage thresholds
-    disk_usage_warning_threshold: float = 80.0  # 80%
-    disk_usage_critical_threshold: float = 90.0  # 90%
+    # Docker disk usage thresholds (in GB)
+    docker_disk_usage_threshold_gb: int = 150  # 150GB cleanup threshold
+    docker_disk_usage_warning_gb: int = 130  # 130GB warning threshold
 
     # Container cleanup settings
     cleanup_stopped_containers: bool = True
@@ -59,8 +60,7 @@ class CleanupConfig:
     max_containers_per_cleanup: int = 50
     max_images_per_cleanup: int = 20
 
-    # Paths
-    docker_root_path: str = "/var/lib/docker"
+    # Logging
     log_file: Optional[str] = None
 
 
@@ -132,39 +132,88 @@ class OpenHandsIdentifier:
         return any(re.match(pattern, text) for pattern in patterns)
 
 
-class DiskUsageMonitor:
-    """Monitors disk usage and provides usage statistics."""
+class DockerDiskUsageMonitor:
+    """Monitors Docker-specific disk usage and provides usage statistics."""
 
-    def __init__(self, docker_root_path: str = "/var/lib/docker"):
-        self.docker_root_path = docker_root_path
+    def __init__(self, docker_client: docker.DockerClient):
+        self.docker_client = docker_client
 
-    def get_disk_usage(self) -> Dict[str, float]:
-        """Get disk usage statistics."""
+    def get_docker_disk_usage(self) -> Dict[str, int]:
+        """Get Docker disk usage statistics using docker.df() API."""
         try:
-            # Get overall disk usage for the Docker root directory
-            usage = shutil.disk_usage(self.docker_root_path)
-            total = usage.total
-            used = usage.used
-            free = usage.free
+            # Get Docker disk usage information (similar to 'docker system df --json')
+            usage_data = self.docker_client.df()
 
-            usage_percent = (used / total) * 100 if total > 0 else 0
+            # Calculate total Docker disk usage from different components
+            container_bytes = self._calculate_containers_usage(usage_data.get('Containers', []))
+            image_bytes = usage_data.get('LayersSize', 0)
+            volume_bytes = self._calculate_volumes_usage(usage_data.get('Volumes', []))
+
+            total_docker_bytes = container_bytes + image_bytes + volume_bytes
 
             return {
-                'total_bytes': total,
-                'used_bytes': used,
-                'free_bytes': free,
-                'usage_percent': usage_percent,
-                'free_percent': 100 - usage_percent
+                'total_docker_bytes': total_docker_bytes,
+                'container_bytes': container_bytes,
+                'image_bytes': image_bytes,
+                'volume_bytes': volume_bytes,
+                'layers_size': usage_data.get('LayersSize', 0),
+                'build_cache_bytes': usage_data.get('BuildCache', [])  # May be a list or int depending on version
             }
         except Exception as e:
-            logging.error(f"Error getting disk usage: {e}")
+            logging.error(f"Error getting Docker disk usage: {e}")
             return {
-                'total_bytes': 0,
-                'used_bytes': 0,
-                'free_bytes': 0,
-                'usage_percent': 0,
-                'free_percent': 100
+                'total_docker_bytes': 0,
+                'container_bytes': 0,
+                'image_bytes': 0,
+                'volume_bytes': 0,
+                'layers_size': 0,
+                'build_cache_bytes': 0
             }
+
+    def _calculate_containers_usage(self, containers_data: List[Dict]) -> int:
+        """Calculate total disk usage from containers."""
+        try:
+            return sum(
+                container.get('SizeRootFs', 0)
+                for container in containers_data
+                if container.get('SizeRootFs') is not None
+            )
+        except Exception as e:
+            logging.warning(f"Error calculating container usage: {e}")
+            return 0
+
+    def _calculate_volumes_usage(self, volumes_data: List[Dict]) -> int:
+        """Calculate total disk usage from volumes."""
+        try:
+            total_volume_bytes = 0
+            for volume in volumes_data:
+                usage_data = volume.get('UsageData')
+                if usage_data and isinstance(usage_data, dict):
+                    size = usage_data.get('Size', 0)
+                    if isinstance(size, int):
+                        total_volume_bytes += size
+            return total_volume_bytes
+        except Exception as e:
+            logging.warning(f"Error calculating volume usage: {e}")
+            return 0
+
+    def is_cleanup_threshold_exceeded(self, total_docker_bytes: int, threshold_gb: int) -> bool:
+        """Check if Docker disk usage exceeds the cleanup threshold."""
+        threshold_bytes = self._gb_to_bytes(threshold_gb)
+        return total_docker_bytes >= threshold_bytes
+
+    def is_warning_threshold_exceeded(self, total_docker_bytes: int, warning_threshold_gb: int) -> bool:
+        """Check if Docker disk usage exceeds the warning threshold."""
+        warning_threshold_bytes = self._gb_to_bytes(warning_threshold_gb)
+        return total_docker_bytes >= warning_threshold_bytes
+
+    def _gb_to_bytes(self, gb: int) -> int:
+        """Convert GB to bytes."""
+        return gb * 1024**3
+
+    def format_gb(self, bytes_value: int) -> str:
+        """Format bytes as GB for human-readable display."""
+        return f"{bytes_value / (1024**3):.1f} GB"
 
     def format_bytes(self, bytes_value: int) -> str:
         """Format bytes into human-readable string."""
@@ -182,7 +231,7 @@ class OpenHandsCleanupManager:
         self.config = config
         self.docker_client = docker.from_env()
         self.identifier = OpenHandsIdentifier()
-        self.disk_monitor = DiskUsageMonitor(config.docker_root_path)
+        self.docker_disk_monitor = DockerDiskUsageMonitor(self.docker_client)
         self._setup_logging()
         self._running = True
 
@@ -347,36 +396,60 @@ class OpenHandsCleanupManager:
         logging.info("Starting OpenHands Docker Disk Space Manager")
         logging.info(f"Check interval: {self.config.check_interval_seconds}s")
         logging.info(f"Cleanup interval: {self.config.cleanup_interval_seconds}s")
+        logging.info(f"Docker disk usage cleanup threshold: {self.config.docker_disk_usage_threshold_gb} GB")
+        logging.info(f"Docker disk usage warning threshold: {self.config.docker_disk_usage_warning_gb} GB")
         logging.info(f"Dry run mode: {self.config.dry_run}")
 
         last_cleanup_time = datetime.now() - timedelta(seconds=self.config.cleanup_interval_seconds)
 
         while self._running:
             try:
-                # Monitor disk usage
-                disk_usage = self.disk_monitor.get_disk_usage()
-                usage_percent = disk_usage['usage_percent']
+                # Monitor Docker disk usage
+                docker_usage = self.docker_disk_monitor.get_docker_disk_usage()
+                total_docker_bytes = docker_usage['total_docker_bytes']
 
                 logging.info(
-                    f"Disk usage: {usage_percent:.1f}% "
-                    f"({self.disk_monitor.format_bytes(disk_usage['used_bytes'])}/"
-                    f"{self.disk_monitor.format_bytes(disk_usage['total_bytes'])})"
+                    f"Docker disk usage: {self.docker_disk_monitor.format_gb(total_docker_bytes)} "
+                    f"(Containers: {self.docker_disk_monitor.format_bytes(docker_usage['container_bytes'])}, "
+                    f"Images: {self.docker_disk_monitor.format_bytes(docker_usage['image_bytes'])}, "
+                    f"Volumes: {self.docker_disk_monitor.format_bytes(docker_usage['volume_bytes'])})"
                 )
 
                 current_time = datetime.now()
                 should_cleanup = False
                 cleanup_reason = ""
 
-                # Check if cleanup is needed based on disk usage
-                if usage_percent >= self.config.disk_usage_critical_threshold:
+                # Check if cleanup is needed based on Docker disk usage threshold
+                if self.docker_disk_monitor.is_cleanup_threshold_exceeded(
+                    total_docker_bytes, self.config.docker_disk_usage_threshold_gb
+                ):
                     should_cleanup = True
-                    cleanup_reason = f"Critical disk usage: {usage_percent:.1f}%"
-                else:
-                    # Check if it's time for scheduled cleanup
+                    cleanup_reason = (
+                        f"Docker disk usage exceeded threshold: "
+                        f"{self.docker_disk_monitor.format_gb(total_docker_bytes)} >= "
+                        f"{self.config.docker_disk_usage_threshold_gb} GB"
+                    )
+                elif self.docker_disk_monitor.is_warning_threshold_exceeded(
+                    total_docker_bytes, self.config.docker_disk_usage_warning_gb
+                ):
+                    # Check if it's time for scheduled cleanup when approaching threshold
                     time_since_cleanup = current_time - last_cleanup_time
                     if time_since_cleanup.total_seconds() >= self.config.cleanup_interval_seconds:
                         should_cleanup = True
-                        cleanup_reason = f"Scheduled cleanup (usage: {usage_percent:.1f}%)"
+                        cleanup_reason = (
+                            f"Scheduled cleanup - approaching threshold: "
+                            f"{self.docker_disk_monitor.format_gb(total_docker_bytes)} >= "
+                            f"{self.config.docker_disk_usage_warning_gb} GB"
+                        )
+                else:
+                    # Check if it's time for regular scheduled cleanup
+                    time_since_cleanup = current_time - last_cleanup_time
+                    if time_since_cleanup.total_seconds() >= self.config.cleanup_interval_seconds:
+                        should_cleanup = True
+                        cleanup_reason = (
+                            f"Regular scheduled cleanup "
+                            f"(Docker usage: {self.docker_disk_monitor.format_bytes(total_docker_bytes)})"
+                        )
 
                 # Perform cleanup if needed
                 if should_cleanup:
@@ -393,10 +466,11 @@ class OpenHandsCleanupManager:
 
                     last_cleanup_time = current_time
 
-                    # Check disk usage after cleanup
-                    post_cleanup_usage = self.disk_monitor.get_disk_usage()
+                    # Check Docker disk usage after cleanup
+                    post_cleanup_usage = self.docker_disk_monitor.get_docker_disk_usage()
+                    post_cleanup_total = post_cleanup_usage['total_docker_bytes']
                     logging.info(
-                        f"Post-cleanup disk usage: {post_cleanup_usage['usage_percent']:.1f}%"
+                        f"Post-cleanup Docker disk usage: {self.docker_disk_monitor.format_gb(post_cleanup_total)}"
                     )
 
                 # Wait for next check (with responsive shutdown checking)
@@ -444,8 +518,8 @@ def create_sample_config(config_path: str):
     config_dict = {
         'check_interval_seconds': config.check_interval_seconds,
         'cleanup_interval_seconds': config.cleanup_interval_seconds,
-        'disk_usage_warning_threshold': config.disk_usage_warning_threshold,
-        'disk_usage_critical_threshold': config.disk_usage_critical_threshold,
+        'docker_disk_usage_threshold_gb': config.docker_disk_usage_threshold_gb,
+        'docker_disk_usage_warning_gb': config.docker_disk_usage_warning_gb,
         'cleanup_stopped_containers': config.cleanup_stopped_containers,
         'container_age_threshold_minutes': config.container_age_threshold_minutes,
         'cleanup_unused_images': config.cleanup_unused_images,
@@ -454,7 +528,6 @@ def create_sample_config(config_path: str):
         'dry_run': config.dry_run,
         'max_containers_per_cleanup': config.max_containers_per_cleanup,
         'max_images_per_cleanup': config.max_images_per_cleanup,
-        'docker_root_path': config.docker_root_path,
         'log_file': config.log_file
     }
 
