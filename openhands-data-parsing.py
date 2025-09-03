@@ -91,7 +91,8 @@ def process_experiment(experiment_name, results_rows):
         with open(report_path, 'r', encoding='utf-8') as f:
             report = json.load(f)
         resolved_ids = report.get('resolved_ids', [])
-        unresolved_ids = report.get('unresolved_ids', [])
+        submitted_ids = report.get('submitted_ids', [])
+        unresolved_ids = [instance_id for instance_id in submitted_ids if instance_id not in resolved_ids]
         total_instances = report.get('total_instances')
 
         if isinstance(total_instances, int) and (len(resolved_ids) + len(unresolved_ids) != total_instances):
@@ -111,7 +112,7 @@ def process_experiment(experiment_name, results_rows):
     for instance_id in instance_ids:
         outcome = 1 if instance_id in resolved_ids else 0
         row = {
-            'experiment_name': experiment_name,
+            'experiment': experiment_name,
             'instance_id': instance_id,
             'cost': 0.0,
             'summary_cost': 0.0,
@@ -137,7 +138,7 @@ for experiment_dir in experiment_dirs:
     process_experiment(experiment_dir, all_rows)
 
 # Build DataFrame and write to CSV
-df = pd.DataFrame(all_rows, columns=['experiment_name', 'instance_id', 'cost', 'summary_cost', 'outcome'])
+df = pd.DataFrame(all_rows, columns=['experiment', 'instance_id', 'cost', 'summary_cost', 'outcome'])
 csv_filename = 'experiment_instance_costs.csv'
 df.to_csv(csv_filename, index=False)
 print(f"\nWrote {len(df)} rows to {csv_filename}")
@@ -202,3 +203,5 @@ print(dict(agg))
 
 # %%
 87079 / (87079+1739)
+
+# %%
