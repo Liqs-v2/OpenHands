@@ -1,15 +1,17 @@
 {
-  "check_interval_seconds": 120,
-  "cleanup_interval_seconds": 300,
-  "docker_disk_usage_threshold_gb": 450,
-  "docker_disk_usage_warning_gb": 400,
+  "check_interval_seconds": 60,
+  "cleanup_interval_seconds": 150,
+  "docker_disk_usage_threshold_gb": 400,
+  "docker_disk_usage_warning_gb": 350,
   "cleanup_stopped_containers": true,
-  "container_age_threshold_minutes": 5,
+  "container_age_threshold_minutes": 1,
   "cleanup_unused_images": true,
-  "image_age_threshold_minutes": 5,
+  "image_age_threshold_minutes": 1,
   "keep_latest_images": 0,
   "dry_run": false,
   "max_containers_per_cleanup": 50,
   "max_images_per_cleanup": 25,
-  "log_file": "docker_disk_space_manager.log"
+  "log_file": "docker_disk_space_manager.log",
+  "prune_dangling_images": true,
+  "prune_builder_cache": true
 }

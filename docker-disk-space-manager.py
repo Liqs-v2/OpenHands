@@ -26,8 +26,8 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
+
 
 import docker
 from docker.models.containers import Container
@@ -62,6 +62,13 @@ class CleanupConfig:
 
     # Logging
     log_file: Optional[str] = None
+
+    # Optional global prunes (outside OpenHands-only scope)
+    # When enabled, these will run the equivalent of:
+    #   docker image prune -f           (dangling images only)
+    #   docker builder prune -f         (build cache)
+    prune_dangling_images: bool = False
+    prune_builder_cache: bool = False
 
 
 class OpenHandsIdentifier:
@@ -458,10 +465,18 @@ class OpenHandsCleanupManager:
                     container_results = self.cleanup_stopped_containers()
                     image_results = self.cleanup_unused_images()
 
+                    # Optional global prunes
+                    reclaimed_total = 0
+                    if self.config.prune_dangling_images:
+                        reclaimed_total += self.prune_dangling_images()
+                    if self.config.prune_builder_cache:
+                        reclaimed_total += self.prune_build_cache()
+
                     logging.info(
                         f"Cleanup completed - "
                         f"Containers: {container_results['removed']} removed, "
-                        f"Images: {image_results['removed']} removed"
+                        f"Images: {image_results['removed']} removed, "
+                        f"Reclaimed: {self.docker_disk_monitor.format_bytes(reclaimed_total)}"
                     )
 
                     last_cleanup_time = current_time
@@ -500,11 +515,58 @@ class OpenHandsCleanupManager:
         """Stop the monitoring loop."""
         self._running = False
 
+    # -------------------------
+    # Global prune integrations (SDK)
+    # -------------------------
+    def prune_dangling_images(self) -> int:
+        """Prune dangling images using Docker SDK and return bytes reclaimed."""
+        if self.config.dry_run:
+            logging.info("[DRY RUN] Would prune dangling images (docker images.prune)")
+            return 0
+        try:
+            # Equivalent to: docker image prune -f (dangling only)
+            result = self.docker_client.images.prune(filters={'dangling': True})
+            reclaimed = int(result.get('SpaceReclaimed', 0) or 0)
+            deleted_count = len(result.get('ImagesDeleted', []) or [])
+            logging.info(
+                "Images prune completed: deleted=%d, reclaimed=%s",
+                deleted_count,
+                self.docker_disk_monitor.format_bytes(reclaimed),
+            )
+            return reclaimed
+        except docker.errors.APIError as api_err:
+            logging.error("Images prune failed: %s", str(api_err))
+            return 0
+        except Exception as e:
+            logging.error("Unexpected error during images prune: %s", str(e))
+            return 0
+
+    def prune_build_cache(self) -> int:
+        """Prune builder cache using Docker SDK and return bytes reclaimed."""
+        if self.config.dry_run:
+            logging.info("[DRY RUN] Would prune builder cache (docker api.prune_builds)")
+            return 0
+        try:
+            # Equivalent to: docker builder prune -f (default: unused cache)
+            result = self.docker_client.api.prune_builds()
+            reclaimed = int(result.get('SpaceReclaimed', 0) or 0)
+            logging.info(
+                "Builder cache prune completed: reclaimed=%s",
+                self.docker_disk_monitor.format_bytes(reclaimed),
+            )
+            return reclaimed
+        except docker.errors.APIError as api_err:
+            logging.error("Builder prune failed: %s", str(api_err))
+            return 0
+        except Exception as e:
+            logging.error("Unexpected error during builder prune: %s", str(e))
+            return 0
+
 
 def load_config_from_file(config_path: str) -> CleanupConfig:
     """Load configuration from a JSON file."""
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, 'r', encoding='utf-8') as f:
             config_data = json.load(f)
         return CleanupConfig(**config_data)
     except Exception as e:
@@ -528,10 +590,12 @@ def create_sample_config(config_path: str):
         'dry_run': config.dry_run,
         'max_containers_per_cleanup': config.max_containers_per_cleanup,
         'max_images_per_cleanup': config.max_images_per_cleanup,
-        'log_file': config.log_file
+        'log_file': config.log_file,
+        'prune_dangling_images': config.prune_dangling_images,
+        'prune_builder_cache': config.prune_builder_cache,
     }
 
-    with open(config_path, 'w') as f:
+    with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(config_dict, f, indent=2)
 
     print(f"Sample configuration created at: {config_path}")
@@ -583,6 +647,16 @@ Examples:
         '--log-file', '-l',
         help='Log file path'
     )
+    parser.add_argument(
+        '--prune-dangling-images',
+        action='store_true',
+        help='Run docker image prune -f (dangling images) during cleanup'
+    )
+    parser.add_argument(
+        '--prune-builder-cache',
+        action='store_true',
+        help='Run docker builder prune -f (build cache) during cleanup'
+    )
 
     args = parser.parse_args()
 
@@ -602,6 +676,10 @@ Examples:
         config.dry_run = True
     if args.log_file:
         config.log_file = args.log_file
+    if getattr(args, 'prune_dangling_images', False):
+        config.prune_dangling_images = True
+    if getattr(args, 'prune_builder_cache', False):
+        config.prune_builder_cache = True
 
     # Create and run the cleanup manager
     manager = OpenHandsCleanupManager(config)
@@ -620,6 +698,10 @@ Examples:
             logging.info("Running one-time cleanup...")
             manager.cleanup_stopped_containers()
             manager.cleanup_unused_images()
+            if manager.config.prune_dangling_images:
+                manager.prune_dangling_images()
+            if manager.config.prune_builder_cache:
+                manager.prune_build_cache()
             logging.info("One-time cleanup completed")
         else:
             # Start continuous monitoring
