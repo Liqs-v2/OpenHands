@@ -260,4 +260,32 @@ print(dict(agg))
 # %%
 87079 / (87079+1739)
 
+# %% [markdown]
+# # Retry within instance occurrence analysis
+
+# %%
+import os
+
+base_dir = 'evaluation/evaluation_outputs/outputs/princeton-nlp__SWE-bench_Verified-test/CodeActAgent'
+experiment_dirs = [
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-llm_summary_N_21_M_10-summarizer_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-raw_agent-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-observation_masking_for_eval-run_1'
+]
+
+for experiment_dir in experiment_dirs:
+    retry_count = 0
+    instance_ids = []
+    print('-'*3 + f'{experiment_dir}' + '-'*3)
+    log_dir = os.path.join(base_dir, experiment_dir, 'infer_logs')
+    for file in os.listdir(log_dir):
+        text = open(os.path.join(log_dir, file), 'r').read()
+        if '----------[The above error occurred. Retrying... (attempt 1 of 2)]----------' in text:
+            instance_id = '_'.join(file.split('.')[0].split('_')[1:])
+            instance_ids.append(instance_id)
+            print(instance_id)
+            retry_count += 1
+    print(f"{experiment_dir}: {retry_count}")
+    print(instance_ids)
+
 # %%
