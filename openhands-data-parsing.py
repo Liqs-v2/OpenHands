@@ -51,23 +51,47 @@ def _aggregate_instance(experiment_path, instance_id, row_map, lock):
     llm_instance_dir = os.path.join(experiment_path, 'llm_completions', instance_id)
     total_cost = 0.0
     summary_cost = 0.0
+    has_summary = False
+    summary_count = 0
+    turn_count = 0
+    sum_reasoning_tokens = 0
+    sum_completion_tokens = 0
+    sum_prompt_tokens = 0
 
     if os.path.isdir(llm_instance_dir):
         for subdir, _, files in os.walk(llm_instance_dir):
             for file in files:
                 if not file.endswith('.json'):
                     continue
+                turn_count += 1
                 json_path = os.path.join(subdir, file)
                 try:
                     with open(json_path, 'r', encoding='utf-8') as f:
                         data = json.load(f)
+
                     cost = data.get('cost', 0.0)
                     if cost is None:
                         cost = 0.0
                     filename_lower = file.lower()
                     if 'summary' in filename_lower:
                         summary_cost += cost
+                        summary_count += 1
+                        has_summary = True
                     total_cost += cost
+
+                    # Aggregate usage fields for mean calculations
+                    response = data.get('response', {}) if isinstance(data, dict) else {}
+                    usage = response.get('usage', {}) if isinstance(response, dict) else {}
+                    completion_tokens = usage.get('completion_tokens', 0) or 0
+                    prompt_tokens = usage.get('prompt_tokens', 0) or 0
+                    details = usage.get('completion_tokens_details')
+                    reasoning_tokens = 0
+                    if isinstance(details, dict):
+                        reasoning_tokens = details.get('reasoning_tokens', 0) or 0
+
+                    sum_completion_tokens += int(completion_tokens)
+                    sum_prompt_tokens += int(prompt_tokens)
+                    sum_reasoning_tokens += int(reasoning_tokens)
                 except (OSError, json.JSONDecodeError) as e:
                     print(f"Error processing {json_path}: {e}")
 
@@ -75,6 +99,17 @@ def _aggregate_instance(experiment_path, instance_id, row_map, lock):
         row = row_map[instance_id]
         row['cost'] = round(total_cost, 4)
         row['summary_cost'] = round(summary_cost, 4)
+        row['has_summary'] = has_summary
+        row['summary_count'] = summary_count
+        row['turn_count'] = turn_count
+        if turn_count > 0:
+            row['mean_reasoning_tokens'] = int(round(sum_reasoning_tokens / turn_count))
+            row['mean_completion_tokens'] = int(round(sum_completion_tokens / turn_count))
+            row['mean_prompt_tokens'] = int(round(sum_prompt_tokens / turn_count))
+        else:
+            row['mean_reasoning_tokens'] = 0
+            row['mean_completion_tokens'] = 0
+            row['mean_prompt_tokens'] = 0
 
 
 def process_experiment(experiment_name, results_rows):
@@ -116,6 +151,12 @@ def process_experiment(experiment_name, results_rows):
             'instance_id': instance_id,
             'cost': 0.0,
             'summary_cost': 0.0,
+            'has_summary': False,
+            'summary_count': 0,
+            'turn_count': 0,
+            'mean_reasoning_tokens': 0,
+            'mean_completion_tokens': 0,
+            'mean_prompt_tokens': 0,
             'outcome': outcome,
         }
         results_rows.append(row)
@@ -138,8 +179,23 @@ for experiment_dir in experiment_dirs:
     process_experiment(experiment_dir, all_rows)
 
 # Build DataFrame and write to CSV
-df = pd.DataFrame(all_rows, columns=['experiment', 'instance_id', 'cost', 'summary_cost', 'outcome'])
-csv_filename = 'experiment_instance_costs.csv'
+df = pd.DataFrame(
+    all_rows,
+    columns=[
+        'experiment',
+        'instance_id',
+        'cost',
+        'summary_cost',
+        'has_summary',
+        'summary_count',
+        'turn_count',
+        'mean_reasoning_tokens',
+        'mean_completion_tokens',
+        'mean_prompt_tokens',
+        'outcome',
+    ]
+)
+csv_filename = 'experiment_instance_costs_openhands.csv'
 df.to_csv(csv_filename, index=False)
 print(f"\nWrote {len(df)} rows to {csv_filename}")
 
