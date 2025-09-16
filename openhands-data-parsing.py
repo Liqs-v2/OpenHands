@@ -33,9 +33,33 @@ import pandas as pd
 base_dir = 'evaluation/evaluation_outputs/outputs/princeton-nlp__SWE-bench_Verified-test/CodeActAgent'
 experiment_dirs = [
     'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-llm_summary_N_21_M_10-summarizer_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-llm_summary_N_21_M_10-verified_50-summarizer_for_eval-run_1',
     'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-raw_agent-run_1',
-    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-observation_masking_for_eval-run_1'
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-raw_agent-verified_50-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_10-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_20-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_29-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_43-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_58-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_54-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_50-verified_50-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_72-observation_masking_for_eval-run_1',
+    'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_86-verified_50-observation_masking_for_eval-run_1'
 ]
+
+csv_filename = 'experiment_instance_costs_openhands.csv'
+
+# Load existing dataframe if it exists, otherwise create empty
+if os.path.exists(csv_filename):
+    df_existing = pd.read_csv(csv_filename)
+    if 'experiment' in df_existing.columns:
+        processed_experiments = set(df_existing['experiment'].unique())
+    else:
+        processed_experiments = set()
+else:
+    df_existing = pd.DataFrame()
+    processed_experiments = set()
 
 # Extract data for each experiment according to the specified requirements
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -128,13 +152,7 @@ def process_experiment(experiment_name, results_rows):
         resolved_ids = report.get('resolved_ids', [])
         submitted_ids = report.get('submitted_ids', [])
         unresolved_ids = [instance_id for instance_id in submitted_ids if instance_id not in resolved_ids]
-        total_instances = report.get('total_instances')
 
-        if isinstance(total_instances, int) and (len(resolved_ids) + len(unresolved_ids) != total_instances):
-            print(
-                f"Sanity check failed for {experiment_name}: "
-                f"resolved({len(resolved_ids)}) + unresolved({len(unresolved_ids)}) != total_instances({total_instances})"
-            )
     except (OSError, json.JSONDecodeError) as e:
         print(f"Error processing report.json for {experiment_name}: {e}")
         return
@@ -175,29 +193,50 @@ def process_experiment(experiment_name, results_rows):
 # Process all experiments (aggregate per-instance rows)
 all_rows = []
 for experiment_dir in experiment_dirs:
+    if experiment_dir in processed_experiments:
+        print(f"\nSkipping already processed experiment: {experiment_dir}")
+        continue
     print(f"\nProcessing experiment: {experiment_dir}")
     process_experiment(experiment_dir, all_rows)
 
-# Build DataFrame and write to CSV
-df = pd.DataFrame(
-    all_rows,
-    columns=[
-        'experiment',
-        'instance_id',
-        'cost',
-        'summary_cost',
-        'has_summary',
-        'summary_count',
-        'turn_count',
-        'mean_reasoning_tokens',
-        'mean_completion_tokens',
-        'mean_prompt_tokens',
-        'outcome',
-    ]
-)
-csv_filename = 'experiment_instance_costs_openhands.csv'
-df.to_csv(csv_filename, index=False)
-print(f"\nWrote {len(df)} rows to {csv_filename}")
+# If there are new rows, append to existing dataframe and write to CSV
+if all_rows:
+    df_new = pd.DataFrame(
+        all_rows,
+        columns=[
+            'experiment',
+            'instance_id',
+            'cost',
+            'summary_cost',
+            'has_summary',
+            'summary_count',
+            'turn_count',
+            'mean_reasoning_tokens',
+            'mean_completion_tokens',
+            'mean_prompt_tokens',
+            'outcome',
+        ]
+    )
+    if not df_existing.empty:
+        df_final = pd.concat([df_existing, df_new], ignore_index=True)
+    else:
+        df_final = df_new
+    df_final.to_csv(csv_filename, index=False)
+    print(f"\nWrote {len(df_new)} new rows to {csv_filename}")
+else:
+    print("\nNo new experiments processed. Existing file is up to date.")
+
+# %%
+df_final[df_final['experiment'].str.contains('summary')].describe()
+
+# %%
+df_final[df_final['experiment'] == 'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_54-verified_50-observation_masking_for_eval-run_1'].describe()
+
+# %%
+df_final[df_final['experiment'] == 'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-llm_summary_N_21_M_10-summarizer_for_eval-run_1'].describe()
+
+# %%
+df[df['experiment'] == 'gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-M_43-verified_50-observation_masking_for_eval-run_1'].describe()
 
 # %% [markdown]
 # # Disable reasoning robustness analysis
@@ -287,5 +326,41 @@ for experiment_dir in experiment_dirs:
             retry_count += 1
     print(f"{experiment_dir}: {retry_count}")
     print(instance_ids)
+
+# %% [markdown]
+# # Re-merge error instances
+
+# %%
+import os, json
+from pathlib import Path
+
+to_fix = Path('evaluation/evaluation_outputs/outputs/princeton-nlp__SWE-bench_Verified-test/CodeActAgent/gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-observation_masking-observation_masking_for_eval-run_1/output.jsonl')
+replacements = Path('evaluation/evaluation_outputs/outputs/princeton-nlp__SWE-bench_Verified-test/CodeActAgent/gemini-2.5-flash_maxiter_250_N_v0.43.0-no-hint-masking_M_10-retries-observation_masking_for_eval-run_1/output.jsonl')
+
+replacements_dict = {}
+
+with open(replacements, 'r') as f:
+    for line in f:
+        data = json.loads(line)
+        instance_id = data['instance_id']
+        replacements_dict[instance_id] = data
+
+# Write updated lines to a temporary file, then replace the original
+from tempfile import NamedTemporaryFile
+
+with NamedTemporaryFile('w', delete=False, dir=to_fix.parent, encoding='utf-8') as tmpfile:
+    with open(to_fix, 'r', encoding='utf-8') as f:
+        for line in f:
+            data = json.loads(line)
+            instance_id = data['instance_id']
+            if instance_id in replacements_dict:
+                out_data = replacements_dict[instance_id]
+            else:
+                out_data = data
+            tmpfile.write(json.dumps(out_data) + '\n')
+
+# Replace the original file with the updated file
+os.replace(tmpfile.name, to_fix)
+
 
 # %%

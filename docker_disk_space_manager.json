@@ -1,8 +1,8 @@
 {
   "check_interval_seconds": 60,
   "cleanup_interval_seconds": 150,
-  "docker_disk_usage_threshold_gb": 400,
-  "docker_disk_usage_warning_gb": 350,
+  "docker_disk_usage_threshold_gb": 700,
+  "docker_disk_usage_warning_gb": 600,
   "cleanup_stopped_containers": true,
   "container_age_threshold_minutes": 1,
   "cleanup_unused_images": true,
