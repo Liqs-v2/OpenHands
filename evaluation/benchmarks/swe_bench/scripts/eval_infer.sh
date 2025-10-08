@@ -14,7 +14,7 @@ fi
 # If instance_id is empty, it means we want to eval on the whole $PROCESS_FILEPATH
 # otherwise, we want to eval on the instance_id
 INSTANCE_ID=$2
-DATASET_NAME=${3:-"princeton-nlp/SWE-bench_Lite"}
+DATASET_NAME=${3:-"princeton-nlp/SWE-bench_Verified"}
 SPLIT=${4:-"test"}
 ENVIRONMENT=${5:-"local"}
 
@@ -84,7 +84,7 @@ echo "Running SWE-bench evaluation"
 echo "=============================================================="
 
 RUN_ID=$(date +"%Y%m%d_%H%M%S")
-N_PROCESS=4
+N_PROCESS=10
 
 
 MODAL_FLAG=""
@@ -101,7 +101,7 @@ if [ -z "$INSTANCE_ID" ]; then
         --dataset_name "$DATASET_NAME" \
         --split "$SPLIT" \
         --predictions_path $SWEBENCH_FORMAT_JSONL \
-        --timeout 3600 \
+        --timeout 2400 \
         --cache_level instance \
         --max_workers $N_PROCESS \
         --run_id $RUN_ID \
