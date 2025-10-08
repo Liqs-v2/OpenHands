@@ -28,10 +28,10 @@ class LLMSummarizingCondenser(RollingCondenser):
         keep_first: int = 1,
         max_event_length: int = 10_000,
     ):
-        if keep_first >= max_size // 2:
-            raise ValueError(
-                f'keep_first ({keep_first}) must be less than half of max_size ({max_size})'
-            )
+        # if keep_first >= max_size // 2:
+        #     raise ValueError(
+        #         f'keep_first ({keep_first}) must be less than half of max_size ({max_size})'
+        #     )
         if keep_first < 0:
             raise ValueError(f'keep_first ({keep_first}) cannot be negative')
         if max_size < 1:
@@ -53,8 +53,10 @@ class LLMSummarizingCondenser(RollingCondenser):
         target_size = self.max_size // 2
         # Number of events to keep from the tail -- target size, minus however many
         # prefix events from the head, minus one for the summarization event
-        events_from_tail = target_size - len(head) - 1
+        # events_from_tail = target_size - len(head) - 1
 
+        # Force through hard-coding M=1 (one turn is 2 events)
+        events_from_tail = 20
         summary_event = (
             view[self.keep_first]
             if isinstance(view[self.keep_first], AgentCondensationObservation)
@@ -77,11 +79,11 @@ PENDING: (Tasks that still need to be done)
 CURRENT_STATE: (Current variables, data structures, or relevant state)
 
 For code-specific tasks, also include:
-CODE_STATE: {File paths, function signatures, data structures}
-TESTS: {Failing cases, error messages, outputs}
-CHANGES: {Code edits, variable updates}
-DEPS: {Dependencies, imports, external calls}
-VERSION_CONTROL_STATUS: {Repository state, current branch, PR status, commit history}
+CODE_STATE: (File paths, function signatures, data structures)
+TESTS: (Failing cases, error messages, outputs)
+CHANGES: (Code edits, variable updates)
+DEPS: (Dependencies, imports, external calls)
+VERSION_CONTROL_STATUS: (Repository state, current branch, PR status, commit history)
 
 PRIORITIZE:
 1. Adapt tracking format to match the actual task type
@@ -101,13 +103,7 @@ CODE_STATE: mod_float() in card.py updated
 TESTS: test_format() passed
 CHANGES: str(val) replaces f"{val:.16G}"
 DEPS: None modified
-VERSION_CONTROL_STATUS: Branch: fix-float-precision, Latest commit: a1b2c3d
-
-For other tasks:
-USER_CONTEXT: Write 20 haikus based on coin flip results
-COMPLETED: 15 haikus written for results [T,H,T,H,T,H,T,T,H,T,H,T,H,T,H]
-PENDING: 5 more haikus needed
-CURRENT_STATE: Last flip: Heads, Haiku count: 15/20"""
+VERSION_CONTROL_STATUS: Branch: fix-float-precision, Latest commit: a1b2c3d"""
 
         prompt += '\n\n'
 
@@ -139,7 +135,6 @@ CURRENT_STATE: Last flip: Heads, Haiku count: 15/20"""
 
         self.add_metadata('response', response.model_dump())
         self.add_metadata('metrics', self.llm.metrics.get())
-
         return Condensation(
             action=CondensationAction(
                 forgotten_events_start_id=min(event.id for event in forgotten_events),
@@ -150,7 +145,13 @@ CURRENT_STATE: Last flip: Heads, Haiku count: 15/20"""
         )
 
     def should_condense(self, view: View) -> bool:
-        return len(view) > self.max_size
+        # A turn consists of 2 event
+        # Should be N+M+keep_first+summary_turn if available
+        # N+M=max_size
+        if len(view) > 3 and isinstance(view[2], AgentCondensationObservation):
+            return len(view) >= self.max_size + self.keep_first + 1
+        else:
+            return len(view) >= self.max_size + self.keep_first
 
     @classmethod
     def from_config(
