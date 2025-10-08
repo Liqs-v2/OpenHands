@@ -174,9 +174,6 @@ class LLM(RetryMixin, DebugMixin):
             or self.config.model.split('/')[-1] in REASONING_EFFORT_SUPPORTED_MODELS
         ):
             kwargs['reasoning_effort'] = self.config.reasoning_effort
-            kwargs.pop(
-                'temperature'
-            )  # temperature is not supported for reasoning models
         # Azure issue: https://github.com/All-Hands-AI/OpenHands/issues/6777
         if self.config.model.startswith('azure'):
             kwargs['max_tokens'] = self.config.max_output_tokens
