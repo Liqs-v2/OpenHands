@@ -445,6 +445,56 @@ def complete_runtime(
         obs = runtime.run_action(action)
         logger.info(obs, extra={'msg_type': 'OBSERVATION'})
 
+    if obs.exit_code == -1:
+        # Still stuck after Ctrl+C and Ctrl+Z, try more aggressive cleanup
+        logger.warning('Command still stuck after Ctrl+C and Ctrl+Z, attempting aggressive cleanup...')
+
+        # Try to kill all background processes
+        cleanup_commands = [
+            'C-d',  # Send EOF to potentially close stuck input
+            'jobs -p | xargs -r kill -9',  # Kill all background jobs with SIGKILL
+            'pkill -9 -P $$',  # Kill all child processes with SIGKILL
+            'reset',  # Reset terminal state
+        ]
+
+        for cleanup_cmd in cleanup_commands:
+            logger.info(f'Trying cleanup command: {cleanup_cmd}')
+            try:
+                action = CmdRunAction(command=cleanup_cmd)
+                action.set_hard_timeout(30)  # Shorter timeout for cleanup commands
+                obs = runtime.run_action(action)
+                logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+            except Exception as e:
+                logger.warning(f'Cleanup command failed: {cleanup_cmd}, error: {e}')
+                continue
+
+        # Try the cd command one more time after cleanup
+        action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+        action.set_hard_timeout(600)
+        logger.info(action, extra={'msg_type': 'ACTION'})
+        obs = runtime.run_action(action)
+        logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+
+    if obs.exit_code == -1:
+        # Last resort: try to restart the runtime environment if it's a DockerRuntime
+        logger.error('Runtime is in corrupted state, attempting container restart...')
+        try:
+            if hasattr(runtime, 'container') and hasattr(runtime.container, 'restart'):
+                logger.info('Attempting to restart Docker container...')
+                runtime.container.restart()
+                # Wait a moment for container to restart
+                import time
+                time.sleep(30)
+
+                # Try cd command again after restart
+                action = CmdRunAction(command=f'cd /workspace/{workspace_dir_name}')
+                action.set_hard_timeout(600)
+                logger.info(action, extra={'msg_type': 'ACTION'})
+                obs = runtime.run_action(action)
+                logger.info(obs, extra={'msg_type': 'OBSERVATION'})
+        except Exception as e:
+            logger.error(f'Failed to restart container: {e}')
+
     assert_and_raise(
         isinstance(obs, CmdOutputObservation) and obs.exit_code == 0,
         f'Failed to cd to /workspace/{workspace_dir_name}: {str(obs)}',
@@ -814,10 +864,10 @@ if __name__ == '__main__':
             output_file,
             args.eval_num_workers,
             process_instance,
-            timeout_seconds=8
-            * 60
+            timeout_seconds=
+            30
             * 60,  # 8 hour PER instance should be more than enough
-            max_retries=5,
+            max_retries=1,
         )
     else:
         critic = AgentFinishedCritic()
