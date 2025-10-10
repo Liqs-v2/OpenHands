@@ -48,6 +48,11 @@ Note that a single turn consists of 2 messages in Openhands. These 2 messages re
 
 To run SWE-bench Verified-50, the subset on which we report our hyperparameter tuning ablation in our work, we use `evaluation/benchmarks/swe_bench/config_v50.toml`. To run on this subset, rename the file to `config.toml`.
 
+## Using an efficient context management strategy
+Follow the [official documentation](https://github.com/All-Hands-AI/OpenHands/tree/main/evaluation) to select a context management strategy.
+
+Note that changing the LLM-Summary configuration may require touching `openhands/memory/condenser/impl/llm_summarizing_condenser.py`, namely changing the `events_from_tail` variable if you would like to use another value than M=10, which we used throughout all our LLM-Summary experiments.
+
 ## Unpacking and using our notebook
 For easier versioning, we serialize our Jupyter notebook to Python with `jupytext`. To deserialize it use:
 ```bash
